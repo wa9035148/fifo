@@ -1,0 +1,95 @@
+module dec_buf(
+
+  input                    clk,
+  input                    reset_n,
+
+  input        [11:0]      reg_target_words,
+  input        [47:0]      dec_c_i,
+  input                    dec_start_i,
+  output logic             dec_rdy_o,
+
+  input        [2:0]       rdy_o,
+  output logic [2:0][15:0] c_i,
+  output                   dec_act_i
+);
+
+  logic [79:0] buffer_w;
+  logic [2:0]  buffer_status_w;
+  logic [2:0][15:0] c_i_w;
+  logic        start_r;
+  logic [11:0] cnt_target_words;
+
+  reg(buffer, 80, buffer_w)
+  reg(buffer_status, 3, buffer_status_w)
+  reg(dec_act_i, 1, dec_start_i);
+  reg(dec_rdy_d, 1, dec_rdy_o);
+
+  always @(posedge clk or negedge reset_n)
+    if (~reset_n)
+      cnt_target_words <=#1 '0;
+    else if (dec_rdy_o)
+      cnt_target_words <=#1 cnt_target_words + 1;
+    else
+      cnt_target_words <=#1 cnt_target_words;
+
+  always @(posedge clk or negedge reset_n)
+    if (~reset_n)
+      start_r <=#1 1'b0;
+    else if (cnt_target_words == reg_target_words - 1)
+      start_r <=#1 1'b0;
+    else if (dec_start_i)
+      start_r <=#1 1'b1;
+    else
+      start_r <=#1 start_r;
+
+  always_comb begin
+    if (dec_start_i)
+      dec_rdy_o = 1;
+    else if (buffer_status_w < 3 && start_r)
+      dec_rdy_o = 1;
+    else
+      dec_rdy_o = 0;
+  end
+
+  always_comb begin
+    buffer_status_w = buffer_status;
+    if (dec_start_i)
+      buffer_status_w = 0;
+    if (dec_rdy_d)
+      buffer_status_w += 3;
+
+    for(int i=0; i<3; i++) begin
+      if (rdy_o[i])
+        buffer_status_w -= 1;
+    end
+  end
+
+  logic [47:0] code;
+  assign code = dec_rdy_d ? dec_c_i : '0;
+
+  always_comb begin
+    buffer_w = buffer;
+    case(buffer_status)
+      3'd0: buffer_w = {32'b0, code};
+      3'd1: buffer_w = {16'b0, code, buffer[15:0]};
+      3'd2: buffer_w = {code, buffer[31:0]};
+      default:
+        buffer_w = buffer;
+    endcase
+
+    for(int i=0; i<3; i++) begin
+      c_i_w[i] = c_i[i];
+      if (rdy_o[i]) begin
+        c_i_w[i] = buffer_w[15:0];
+        buffer_w >>= 16;
+      end
+    end
+  end
+
+  always @(posedge clk or negedge reset_n)
+    if (~reset_n)
+      c_i <=#1 '0;
+    else
+      c_i <=#1 c_i_w;
+
+endmodule
